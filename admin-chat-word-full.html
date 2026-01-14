@@ -1445,7 +1445,11 @@
             const messagesDiv = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message message-${type}`;
-            messageDiv.innerHTML = `<div class="message-content">${content}</div>`;
+            let messageContent = content;
+            if (type === 'ai') {
+                messageContent += '<br><a href="https://logistic-erp.meu-solutions.com/warehouses/list" target="_blank">Xem demo sản phẩm</a>';
+            }
+            messageDiv.innerHTML = `<div class="message-content">${messageContent}</div>`;
             messagesDiv.appendChild(messageDiv);
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         }

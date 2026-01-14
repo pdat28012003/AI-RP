@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI HỎI ĐÁP THẮC MẮC - ĐẢNG ỦY PHƯỜNG BÌNH THẠNH</title>
+    <title>AI Chat Bot MeU Solution</title>
     <style>
         * {
             margin: 0;
@@ -46,7 +46,7 @@
             background: #c4cbec;
             color: rgb(0, 0, 0);
             display: flex;
-            justify-content: space-between;
+            justify-content: center;
             align-items: center;
             flex-shrink: 0;
         }
@@ -590,15 +590,18 @@
     <div class="container">
         <div class="chat-area">
             <div class="chat-header">
-                <h1>🤖 AI HỎI ĐÁP THẮC MẮC - ĐẢNG ỦY PHƯỜNG BÌNH THẠNH</h1>
+                <h1>🤖 AI Chat Bot MeU Solution</h1>
             </div>
             <div class="chat-messages" id="chatMessages">
                 <div class="message message-ai">
                     <div class="message-content">
-                        Xin chào! 👋 Tôi là trợ lý AI HỎI ĐÁP THẮC MẮC - ĐẢNG ỦY PHƯỜNG BÌNH THẠNH. 
-                        
-
+                        Xin chào! 👋 Tôi là trợ lý AI Chat Bot MeU Solution. 
+                        Bạn có thể đặt câu hỏi về dự án quản lý xe nâng hoặc các chức năng liên quan đến dự án.
                     </div>
+                    <div class="options-container">
+                            <button class="option-btn" onclick="selectOption('📄 TÓM TẮT DỰ ÁN')">📄 TÓM TẮT DỰ ÁN</button>
+                            <button class="option-btn" onclick="selectOption('📄 GIỚI THIỆU CHUNG HỆ THỐNG QUẢN LÝ XE NÂNG')">📄 GIỚI THIỆU CHUNG HỆ THỐNG QUẢN LÝ XE NÂNG</button>
+                        </div>
                 </div>
             </div>
             <div class="chat-input-area">
@@ -968,7 +971,11 @@
             const messagesDiv = document.getElementById('chatMessages');
             const messageDiv = document.createElement('div');
             messageDiv.className = `message message-${type}`;
-            messageDiv.innerHTML = `<div class="message-content">${content}</div>`;
+            let messageContent = content;
+            if (type === 'ai') {
+                messageContent += '<br><a href="https://logistic-erp.meu-solutions.com/warehouses/list" target="_blank">Xem demo sản phẩm</a>';
+            }
+            messageDiv.innerHTML = `<div class="message-content">${messageContent}</div>`;
             messagesDiv.appendChild(messageDiv);
             
             if (autoScroll) {
