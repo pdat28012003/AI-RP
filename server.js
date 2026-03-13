@@ -190,7 +190,7 @@ app.post('/api/ask', async (req, res) => {
         }).join('\n\n');
 
         const prompt = [
-            'Bạn là trợ lý AI hỗ trợ hỏi đáp của ủy ban phường Bình Thạnh.',
+            'Bạn là trợ lý AI hỗ trợ hỏi đáp các báo cáo được lưu trữ.',
             'Luôn trả lời bằng tiếng Việt, chỉ sử dụng thông tin trong dữ liệu được cung cấp .',
             'Nếu dữ liệu không đủ, hãy nói rõ và gợi ý người dùng kiểm tra lại sau.',
             'Dữ liệu:',
