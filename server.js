@@ -300,10 +300,10 @@ app.delete('/api/users/:id', requireAdmin, async (req, res) => {
 // DATA ROUTES - UPDATED for User Tracking
 // ============================================
 
-// Get user's data
-app.get('/api/data', requireAuth, async (req, res) => {
+// Get all data (public endpoint)
+app.get('/api/data', async (req, res) => {
     try {
-        const data = await ChatData.find({ userId: req.user.userId }).sort({ createdAt: -1 });
+        const data = await ChatData.find().sort({ createdAt: -1 });
         const formattedData = data.map(item => ({
             id: item._id,
             title: item.title,
@@ -321,18 +321,21 @@ app.get('/api/data', requireAuth, async (req, res) => {
     }
 });
 
-// Add new data
-app.post('/api/data', requireAuth, async (req, res) => {
+// Add new data (public endpoint)
+app.post('/api/data', async (req, res) => {
     try {
-        const { title, content, fileType, htmlContent, imageCount } = req.body;
+        const { title, content, fileType, htmlContent, imageCount, uploadedBy } = req.body;
 
         if (!title || !content) {
             return res.status(400).json({ error: 'Title and content are required' });
         }
 
+        // Use a default user ID for public submissions
+        const defaultUserId = new mongoose.Types.ObjectId();
+
         const newData = new ChatData({
-            userId: req.user.userId,
-            uploadedBy: req.user.username,
+            userId: defaultUserId,
+            uploadedBy: uploadedBy || 'Anonymous',
             title,
             content,
             fileType: fileType || 'text',
@@ -342,7 +345,7 @@ app.post('/api/data', requireAuth, async (req, res) => {
 
         await newData.save();
 
-        console.log(`✅ Saved new ${fileType || 'text'} data by ${req.user.username}: "${title}"${imageCount > 0 ? ` with ${imageCount} images` : ''}`);
+        console.log(`✅ Saved new ${fileType || 'text'} data by ${uploadedBy || 'Anonymous'}: "${title}"${imageCount > 0 ? ` with ${imageCount} images` : ''}`);
 
         res.json({
             id: newData._id,
@@ -360,17 +363,12 @@ app.post('/api/data', requireAuth, async (req, res) => {
     }
 });
 
-// Delete data (only creator or admin)
-app.delete('/api/data/:id', requireAuth, async (req, res) => {
+// Delete data (public endpoint)
+app.delete('/api/data/:id', async (req, res) => {
     try {
         const data = await ChatData.findById(req.params.id);
         if (!data) {
             return res.status(404).json({ error: 'Data not found' });
-        }
-
-        // Check if user is creator or admin
-        if (data.userId.toString() !== req.user.userId && req.user.role !== 'admin') {
-            return res.status(403).json({ error: 'Permission denied' });
         }
 
         await ChatData.findByIdAndDelete(req.params.id);
