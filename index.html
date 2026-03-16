@@ -1061,10 +1061,12 @@
             messagesDiv.scrollTop = questionScrollPosition;
             
             try {
+                const sessionId = getSessionId();
                 const response = await fetch('/api/ask', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        'x-session-id': sessionId || ''
                     },
                     body: JSON.stringify({ question: message })
                 });
