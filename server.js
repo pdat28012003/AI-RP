@@ -36,11 +36,14 @@ const storage = multer.diskStorage({
 const upload = multer({
     storage: storage,
     fileFilter: (req, file, cb) => {
-        const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-        if (allowedMimes.includes(file.mimetype)) {
+        const allowedMimes = [
+            'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        ];
+        if (allowedMimes.includes(file.mimetype) || file.originalname.endsWith('.docx')) {
             cb(null, true);
         } else {
-            cb(new Error('Only image files are allowed'));
+            cb(new Error('Only image and Word files are allowed'));
         }
     }
 });
@@ -61,15 +64,30 @@ mongoose.connect(process.env.MONGO_URL, {
 .catch(err => console.error('❌ MongoDB Connection Error:', err));
 
 // ============================================
-// UPDATED Schema - Support Word Documents
+// SCHEMAS
 // ============================================
+
+// User Schema
+const UserSchema = new mongoose.Schema({
+    username: { type: String, required: true, unique: true },
+    password: { type: String, required: true },
+    email: { type: String, unique: true, sparse: true },
+    role: { type: String, enum: ['user', 'admin'], default: 'user' },
+    createdAt: { type: Date, default: Date.now },
+    updatedAt: { type: Date, default: Date.now }
+});
+
+// Updated ChatData Schema - with userId tracking
 const ChatDataSchema = new mongoose.Schema({
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    uploadedBy: { type: String, required: true },
     title: { type: String, required: true },
     content: { type: String, required: true },
     fileType: { type: String, enum: ['text', 'word'], default: 'text' },
     htmlContent: { type: String, default: null },
     imageCount: { type: Number, default: 0 },
     date: { type: String, default: () => new Date().toLocaleString('vi-VN') },
+    uploadDate: { type: Date, default: Date.now },
     createdAt: { type: Date, default: Date.now }
 });
 
@@ -82,18 +100,210 @@ const CarouselImageSchema = new mongoose.Schema({
     createdAt: { type: Date, default: Date.now }
 });
 
+const User = mongoose.model('User', UserSchema);
 const ChatData = mongoose.model('ChatData', ChatDataSchema);
 const CarouselImage = mongoose.model('CarouselImage', CarouselImageSchema);
 
 // ============================================
-// DATA ROUTES - UPDATED for Word Support
+// SESSION STORAGE (simple in-memory)
+// ============================================
+const sessions = new Map(); // {sessionId: {userId, username, role, expiresAt}}
+
+const createSession = (userId, username, role) => {
+    const sessionId = Math.random().toString(36).substring(2, 15);
+    const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+    sessions.set(sessionId, { userId, username, role, expiresAt });
+    return sessionId;
+};
+
+const getSession = (sessionId) => {
+    const session = sessions.get(sessionId);
+    if (session && session.expiresAt > Date.now()) {
+        return session;
+    }
+    sessions.delete(sessionId);
+    return null;
+};
+
+const deleteSession = (sessionId) => {
+    sessions.delete(sessionId);
+};
+
+// Middleware: Check authentication
+const requireAuth = (req, res, next) => {
+    const sessionId = req.headers['x-session-id'] || req.body.sessionId;
+    const session = getSession(sessionId);
+    if (!session) {
+        return res.status(401).json({ error: 'Unauthorized' });
+    }
+    req.user = session;
+    req.sessionId = sessionId;
+    next();
+};
+
+const requireAdmin = (req, res, next) => {
+    const sessionId = req.headers['x-session-id'] || req.body.sessionId;
+    const session = getSession(sessionId);
+    if (!session || session.role !== 'admin') {
+        return res.status(403).json({ error: 'Forbidden: Admin access required' });
+    }
+    req.user = session;
+    req.sessionId = sessionId;
+    next();
+};
+
+// ============================================
+// AUTHENTICATION ROUTES
 // ============================================
 
-// Get all data
-app.get('/api/data', async (req, res) => {
+// Login
+app.post('/api/auth/login', async (req, res) => {
     try {
-        const data = await ChatData.find().sort({ createdAt: -1 });
-        // Map _id to id for frontend compatibility, include new fields
+        const { username, password } = req.body;
+
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Username and password are required' });
+        }
+
+        const user = await User.findOne({ username });
+        if (!user) {
+            return res.status(401).json({ error: 'Invalid username or password' });
+        }
+
+        // Plain text comparison (as per user requirement)
+        if (user.password !== password) {
+            return res.status(401).json({ error: 'Invalid username or password' });
+        }
+
+        const sessionId = createSession(user._id, user.username, user.role);
+        res.json({
+            success: true,
+            sessionId,
+            username: user.username,
+            role: user.role
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Logout
+app.post('/api/auth/logout', (req, res) => {
+    const sessionId = req.headers['x-session-id'];
+    if (sessionId) {
+        deleteSession(sessionId);
+    }
+    res.json({ success: true, message: 'Logged out' });
+});
+
+// Check session
+app.get('/api/auth/check', (req, res) => {
+    const sessionId = req.headers['x-session-id'];
+    const session = getSession(sessionId);
+
+    if (session) {
+        res.json({
+            authenticated: true,
+            username: session.username,
+            role: session.role,
+            userId: session.userId
+        });
+    } else {
+        res.json({ authenticated: false });
+    }
+});
+
+// ============================================
+// USER MANAGEMENT ROUTES (Admin only)
+// ============================================
+
+// Get all users
+app.get('/api/users', requireAdmin, async (req, res) => {
+    try {
+        const users = await User.find().select('-password').sort({ createdAt: -1 });
+        const usersWithStats = await Promise.all(users.map(async (user) => {
+            const dataCount = await ChatData.countDocuments({ userId: user._id });
+            return {
+                id: user._id,
+                username: user.username,
+                email: user.email,
+                role: user.role,
+                createdAt: user.createdAt,
+                dataCount
+            };
+        }));
+        res.json(usersWithStats);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Create new user (Admin only)
+app.post('/api/users', requireAdmin, async (req, res) => {
+    try {
+        const { username, password, email, role } = req.body;
+
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Username and password are required' });
+        }
+
+        const existingUser = await User.findOne({ username });
+        if (existingUser) {
+            return res.status(400).json({ error: 'Username already exists' });
+        }
+
+        const newUser = new User({
+            username,
+            password,
+            email: email || undefined,
+            role: role || 'user'
+        });
+
+        await newUser.save();
+        console.log(`✅ Created new user: ${username} (${role || 'user'})`);
+
+        res.json({
+            success: true,
+            id: newUser._id,
+            username: newUser.username,
+            email: newUser.email,
+            role: newUser.role,
+            createdAt: newUser.createdAt
+        });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+// Delete user (Admin only)
+app.delete('/api/users/:id', requireAdmin, async (req, res) => {
+    try {
+        const user = await User.findByIdAndDelete(req.params.id);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Delete all data uploaded by this user
+        const deleteResult = await ChatData.deleteMany({ userId: user._id });
+        console.log(`🗑️ Deleted user: ${user.username} and ${deleteResult.deletedCount} related data items`);
+
+        res.json({
+            success: true,
+            message: `User deleted and ${deleteResult.deletedCount} data items removed`
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ============================================
+// DATA ROUTES - UPDATED for User Tracking
+// ============================================
+
+// Get user's data
+app.get('/api/data', requireAuth, async (req, res) => {
+    try {
+        const data = await ChatData.find({ userId: req.user.userId }).sort({ createdAt: -1 });
         const formattedData = data.map(item => ({
             id: item._id,
             title: item.title,
@@ -101,7 +311,9 @@ app.get('/api/data', async (req, res) => {
             fileType: item.fileType || 'text',
             htmlContent: item.htmlContent,
             imageCount: item.imageCount || 0,
-            date: item.date
+            date: item.date,
+            uploadedBy: item.uploadedBy,
+            uploadDate: item.uploadDate
         }));
         res.json(formattedData);
     } catch (err) {
@@ -109,27 +321,29 @@ app.get('/api/data', async (req, res) => {
     }
 });
 
-// Add new data - UPDATED to support Word documents
-app.post('/api/data', async (req, res) => {
+// Add new data
+app.post('/api/data', requireAuth, async (req, res) => {
     try {
         const { title, content, fileType, htmlContent, imageCount } = req.body;
-        
+
         if (!title || !content) {
             return res.status(400).json({ error: 'Title and content are required' });
         }
 
-        const newData = new ChatData({ 
-            title, 
+        const newData = new ChatData({
+            userId: req.user.userId,
+            uploadedBy: req.user.username,
+            title,
             content,
             fileType: fileType || 'text',
             htmlContent: htmlContent || null,
             imageCount: imageCount || 0
         });
-        
+
         await newData.save();
-        
-        console.log(`✅ Saved new ${fileType || 'text'} data: "${title}"${imageCount > 0 ? ` with ${imageCount} images` : ''}`);
-        
+
+        console.log(`✅ Saved new ${fileType || 'text'} data by ${req.user.username}: "${title}"${imageCount > 0 ? ` with ${imageCount} images` : ''}`);
+
         res.json({
             id: newData._id,
             title: newData.title,
@@ -137,20 +351,30 @@ app.post('/api/data', async (req, res) => {
             fileType: newData.fileType,
             htmlContent: newData.htmlContent,
             imageCount: newData.imageCount,
-            date: newData.date
+            date: newData.date,
+            uploadedBy: newData.uploadedBy,
+            uploadDate: newData.uploadDate
         });
     } catch (err) {
         res.status(400).json({ error: err.message });
     }
 });
 
-// Delete data
-app.delete('/api/data/:id', async (req, res) => {
+// Delete data (only creator or admin)
+app.delete('/api/data/:id', requireAuth, async (req, res) => {
     try {
-        const deletedData = await ChatData.findByIdAndDelete(req.params.id);
-        if (deletedData) {
-            console.log(`🗑️ Deleted data: "${deletedData.title}"`);
+        const data = await ChatData.findById(req.params.id);
+        if (!data) {
+            return res.status(404).json({ error: 'Data not found' });
         }
+
+        // Check if user is creator or admin
+        if (data.userId.toString() !== req.user.userId && req.user.role !== 'admin') {
+            return res.status(403).json({ error: 'Permission denied' });
+        }
+
+        await ChatData.findByIdAndDelete(req.params.id);
+        console.log(`🗑️ Deleted data: "${data.title}"`);
         res.json({ message: 'Deleted successfully' });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -158,7 +382,7 @@ app.delete('/api/data/:id', async (req, res) => {
 });
 
 // UPDATED Ask endpoint - support Word documents in context
-app.post('/api/ask', async (req, res) => {
+app.post('/api/ask', requireAuth, async (req, res) => {
     try {
         if (!geminiModel) {
             return res.status(500).json({ error: 'Thiếu cấu hình Gemini API' });
@@ -171,6 +395,7 @@ app.post('/api/ask', async (req, res) => {
 
         const regex = new RegExp(escapeRegex(question), 'i');
         let relevantData = await ChatData.find({
+            userId: req.user.userId,
             $or: [
                 { title: { $regex: regex } },
                 { content: { $regex: regex } }
@@ -178,7 +403,7 @@ app.post('/api/ask', async (req, res) => {
         }).limit(6);
 
         if (relevantData.length === 0) {
-            relevantData = await ChatData.find().sort({ createdAt: -1 }).limit(6);
+            relevantData = await ChatData.find({ userId: req.user.userId }).sort({ createdAt: -1 }).limit(6);
         }
 
         const context = relevantData.map((item, index) => {
@@ -343,6 +568,10 @@ app.delete('/api/carousel/:id', async (req, res) => {
 // SERVE FRONTEND FILES
 // ============================================
 
+app.get('/login', (req, res) => {
+    res.sendFile(path.join(__dirname, 'login.html'));
+});
+
 app.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, 'admin-chat-word-full.html'));
 });
@@ -357,23 +586,35 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`
-╔═══════════════════════════════════════╗
-║   🚀 AI Chat Admin Server Started    ║
-║                                       ║
-║   📡 Port: ${PORT}                        ║
-║   🗄️  Database: MongoDB               ║
-║   📄 Word Support: ✅ Enabled         ║
-║                                       ║
-║   Endpoints:                          ║
-║   • GET  /api/data                    ║
-║   • POST /api/data (Word support)     ║
-║   • DEL  /api/data/:id                ║
-║   • POST /api/ask                     ║
-║   • GET  /api/carousel                ║
-║   • POST /api/carousel/upload         ║
-║   • DEL  /api/carousel/:id            ║
-║                                       ║
-║   Open: http://localhost:${PORT}        ║
-╚═══════════════════════════════════════╝
+╔════════════════════════════════════════════╗
+║   🚀 AI Chat Admin Server Started         ║
+║                                            ║
+║   📡 Port: ${PORT}                            ║
+║   🗄️  Database: MongoDB                    ║
+║   📄 Word Support: ✅ Enabled              ║
+║   🔐 Authentication: ✅ Enabled            ║
+║                                            ║
+║   Endpoints:                               ║
+║   • POST   /api/auth/login                ║
+║   • POST   /api/auth/logout               ║
+║   • GET    /api/auth/check                ║
+║   • GET    /api/users (admin)             ║
+║   • POST   /api/users (admin)             ║
+║   • DELETE /api/users/:id (admin)         ║
+║   • GET    /api/data                      ║
+║   • POST   /api/data                      ║
+║   • DELETE /api/data/:id                  ║
+║   • POST   /api/ask                       ║
+║   • GET    /api/carousel                  ║
+║   • POST   /api/carousel/upload           ║
+║   • DELETE /api/carousel/:id              ║
+║                                            ║
+║   Pages:                                   ║
+║   • GET /login   → Login page             ║
+║   • GET /admin   → Admin panel            ║
+║   • GET /        → Public page            ║
+║                                            ║
+║   Open: http://localhost:${PORT}/login      ║
+╚════════════════════════════════════════════╝
     `);
 });

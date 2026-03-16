@@ -93,6 +93,85 @@
         }
 
         /* Header */
+        .top-nav {
+            position: fixed;
+            top: 0;
+            right: 20px;
+            padding: 15px 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            z-index: 1000;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 0 0 12px 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .user-info {
+            font-size: 13px;
+            font-weight: 600;
+            color: #333;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .user-info .user-badge {
+            background: #667eea;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+
+        .login-btn, .logout-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.3s;
+        }
+
+        .login-btn {
+            background: #667eea;
+            color: white;
+        }
+
+        .login-btn:hover {
+            background: #764ba2;
+            transform: translateY(-2px);
+        }
+
+        .logout-btn {
+            background: #fee;
+            color: #c33;
+            border: 1px solid #fcc;
+        }
+
+        .logout-btn:hover {
+            background: #fdd;
+        }
+
+        .admin-link {
+            padding: 8px 16px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            text-decoration: none;
+            transition: all 0.3s;
+        }
+
+        .admin-link:hover {
+            background: #218838;
+            transform: translateY(-2px);
+        }
+
         .chat-header {
             background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
             padding: 40px 32px;
@@ -648,6 +727,18 @@
     </style>
 </head>
 <body>
+    <!-- Top Navigation -->
+    <div class="top-nav" id="topNav">
+        <div class="user-info" id="userInfoSection" style="display: none;">
+            <span>👤 <span id="usernameDisplay">User</span></span>
+            <button class="logout-btn" onclick="handleLogout()">Đăng Xuất</button>
+            <a href="/admin" class="admin-link">⚙️ Admin</a>
+        </div>
+        <div id="loginSection">
+            <a href="/login" class="login-btn">🔐 Đăng Nhập</a>
+        </div>
+    </div>
+
     <div class="app-container">
         <div class="chat-header">
             <div class="header-content">
@@ -701,8 +792,46 @@
     <script>
         let dataStore = [];
         const API_URL = '/api/data';
+        const AUTH_API_URL = '/api/auth';
+
+        function getSessionId() {
+            return localStorage.getItem('sessionId');
+        }
+
+        function handleLogout() {
+            if (confirm('Bạn có muốn đăng xuất?')) {
+                const sessionId = getSessionId();
+                if (sessionId) {
+                    fetch(`${AUTH_API_URL}/logout`, {
+                        method: 'POST',
+                        headers: { 'x-session-id': sessionId }
+                    }).catch(err => console.error('Logout error:', err));
+                }
+                localStorage.removeItem('sessionId');
+                localStorage.removeItem('username');
+                localStorage.removeItem('role');
+                location.reload();
+            }
+        }
+
+        function checkAuthentication() {
+            const sessionId = getSessionId();
+            const username = localStorage.getItem('username');
+
+            if (sessionId && username) {
+                // User is logged in
+                document.getElementById('loginSection').style.display = 'none';
+                document.getElementById('userInfoSection').style.display = 'flex';
+                document.getElementById('usernameDisplay').textContent = username;
+            } else {
+                // User is not logged in
+                document.getElementById('loginSection').style.display = 'block';
+                document.getElementById('userInfoSection').style.display = 'none';
+            }
+        }
 
         window.onload = function() {
+            checkAuthentication();
             fetchData();
             document.getElementById('chatInput').focus();
         };
@@ -710,6 +839,7 @@
         async function fetchData() {
             try {
                 const response = await fetch(API_URL);
+                if (!response.ok) throw new Error('Failed to fetch');
                 dataStore = await response.json();
                 console.log(`✅ Loaded ${dataStore.length} documents`);
             } catch (error) {
