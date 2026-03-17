@@ -379,8 +379,8 @@ app.delete('/api/data/:id', async (req, res) => {
     }
 });
 
-// UPDATED Ask endpoint - support Word documents in context
-app.post('/api/ask', requireAuth, async (req, res) => {
+// UPDATED Ask endpoint - support Word documents in context (PUBLIC - no auth required)
+app.post('/api/ask', async (req, res) => {
     try {
         if (!geminiModel) {
             return res.status(500).json({ error: 'Thiếu cấu hình Gemini API' });
@@ -393,7 +393,6 @@ app.post('/api/ask', requireAuth, async (req, res) => {
 
         const regex = new RegExp(escapeRegex(question), 'i');
         let relevantData = await ChatData.find({
-            userId: req.user.userId,
             $or: [
                 { title: { $regex: regex } },
                 { content: { $regex: regex } }
@@ -401,7 +400,7 @@ app.post('/api/ask', requireAuth, async (req, res) => {
         }).limit(6);
 
         if (relevantData.length === 0) {
-            relevantData = await ChatData.find({ userId: req.user.userId }).sort({ createdAt: -1 }).limit(6);
+            relevantData = await ChatData.find().sort({ createdAt: -1 }).limit(6);
         }
 
         const context = relevantData.map((item, index) => {
